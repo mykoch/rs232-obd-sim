@@ -21,7 +21,7 @@ import string
 import re
 import serial
 import threading
-from utils import debug
+from utils import debug, calculate_crc
 
 def strhex_to_int(s):
     try:
@@ -44,6 +44,7 @@ class Elm(threading.Thread):
         self.is_exit = False
         self.ser = serial.Serial(port, timeout=1)
         self.ECHO = 1
+        self.HEADER = 0
         self.status = self.IDLE
         self.sensors = []
         return
@@ -71,7 +72,7 @@ class Elm(threading.Thread):
         command = "".join(b[:-2]).upper()
         self.notify(command)
 
-    def spacify(self, str):
+    def spacifyDecorator(self, str):
         """ Introduces a space between eand 2 characters"""
         flag = False
         output = ''
@@ -84,22 +85,39 @@ class Elm(threading.Thread):
                 flag = True
         return output
 
-    def write(self, s):
-        debug('Sent response "%s" '%s)
-        self.ser.write(s+'\r\n')
+    def headerResponseDecorator(self, str):
+        msg = '486B10'+str
+        checksum = calculate_crc(msg)
+        return msg+checksum
+
+    def write_response(self, str):
+        if self.HEADER:
+            str = self.headerResponseDecorator(str)
+        str = self.spacifyDecorator(str)
+        self.write_raw(str)
+
+    def write_raw(self, s):
+        debug('Sent "%s" '%s)
+        self.ser.write(s)
+
+    def write_crlf(self):
+        self.ser.write('\r\n')
+
+    def write_end(self):
+        self.write_crlf()
         self.ser.write('>')
 
     def ok(self):
-        self.write('OK')
+        self.write_raw('OK')
 
     def error(self):
-        self.write('ERROR')
+        self.write_raw('ERROR')
 
     def nodata(self):
-        self.write('NO DATA')
+        self.write_raw('NO DATA')
 
     def unknown(self):
-        self.write('?')
+        self.write_raw('?')
 
     def doReset(self):
         self.ECHO = 1
@@ -108,10 +126,14 @@ class Elm(threading.Thread):
 
     def doInit(self):
         self.status = self.SHOWTIME
-        self.write('BUSINIT: ...OK')
+        self.write_raw('BUS INIT: ...')
 
     def setEcho(self, s = 0):
         self.ECHO = s
+        self.ok()
+
+    def setHeader(self, s = 0):
+        self.HEADER = s
         self.ok()
 
     def checkHexadecimal(self, s):
@@ -126,22 +148,29 @@ class Elm(threading.Thread):
             if atcommand == 'Z':
                 self.doReset()
             elif atcommand == 'I':
-                self.write(self.ID)
+                self.write_raw(self.ID)
             elif atcommand == 'E0':
                 self.setEcho(0)
             elif atcommand == 'E1':
                 self.setEcho(1)
+            elif atcommand == 'H0':
+                self.setHeader(0)
+            elif atcommand == 'H1':
+                self.setHeader(1)
             else:
                 self.unknown()
         else:
             if self.checkHexadecimal(command):
                 if self.status == self.IDLE:
                     self.doInit()
+                    self.ok()
+                    self.write_crlf()
                 svc = strhex_to_int(command[:2])
                 pid = strhex_to_int(command[2:])
                 self.notifySensor(svc, pid)
             else:
                 self.error()
+        self.write_end()
 
 
     def registerSensor(self, fSensor):
@@ -157,8 +186,7 @@ class Elm(threading.Thread):
             debug('    Checking sensor %s %s'%(s['svc'],s['pid']))
             if s['svc'] == svc and s['pid']== pid:
                 debug('Found registered sensor %s%s'%(s['svc'],s['pid']))
-                self.write(self.spacify(s['sensor'].response()))
+                self.write_response(s['sensor'].response())
                 return
         self.nodata()
         debug('WARNING: %s %s not found'%(svc, pid))
-

@@ -19,20 +19,8 @@
 
 
 
-def hex_to_str(x, chars = 1):
-    if x == None:
-        return ''
-    else:
-        if bytes == 0:
-           mask = '%x'
-        else:
-           mask = '%0.' + str(chars) + 'x'
-        return (mask % x).upper()
+from utils import hex_to_str
 
-##TODO Add unittest
-##assertEqual(hex_to_str(0,1), '0')
-##assertEqual(hex_to_str(0,2), '00')
-##assertEqual(hex_to_str(0xFF,2), 'FF')
 
 class Sensor():
     def __init__(self, service, pid = None, my_car = None):
